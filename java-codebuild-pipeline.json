@@ -333,48 +333,35 @@
                 }
             }
         },
-        "WebGroup": {
-            "Type": "AWS::AutoScaling::AutoScalingGroup",
-            "Properties": {
-                "DesiredCapacity": {
-                    "Ref": "asgsize"
-                },
-                "LaunchConfigurationName": {
-                    "Ref": "WebLaunchConf"
-                },
-                "MaxSize": {
-                    "Ref": "asgsize"
-                },
-                "MinSize": {
-                    "Ref": "asgsize"
-                },
-                "Tags": [
-                    {
-                        "Key": "Name",
-                        "PropagateAtLaunch": "true",
-                        "Value": "webapp"
-                    },
-                    {
-                        "Key": "Role",
-                        "PropagateAtLaunch": "true",
-                        "Value": "webserver"
-                    }
-                ],
-                "TargetGroupARNs": [
-                    {
-                        "Ref": "ELBTargetGroup"
-                    }
-                ],
-                "VPCZoneIdentifier": [
-                    {
-                        "Ref": "PublicSubnet1"
-                    },
-                    {
-                        "Ref": "PublicSubnet2"
-                    }
-                ]
-            }
+		"WebGroup": {
+    "Type": "AWS::AutoScaling::AutoScalingGroup",
+    "Properties": {
+        "DesiredCapacity": {"Ref": "asgsize"},
+        "LaunchTemplate": {
+            "LaunchTemplateId": {"Ref": "WebLaunchConf"},
+            "Version": {"Fn::GetAtt": ["WebLaunchConf", "LatestVersionNumber"]}
         },
+        "MaxSize": {"Ref": "asgsize"},
+        "MinSize": {"Ref": "asgsize"},
+        "Tags": [
+            {
+                "Key": "Name",
+                "PropagateAtLaunch": "true",
+                "Value": "webapp"
+            },
+            {
+                "Key": "Role",
+                "PropagateAtLaunch": "true",
+                "Value": "webserver"
+            }
+        ],
+        "TargetGroupARNs": [{"Ref": "ELBTargetGroup"}],
+        "VPCZoneIdentifier": [
+            {"Ref": "PublicSubnet1"},
+            {"Ref": "PublicSubnet2"}
+        ]
+    }
+},
         "WebInstanceProfile": {
             "Type": "AWS::IAM::InstanceProfile",
             "Properties": {
@@ -415,15 +402,15 @@
                                 "apt-get update -y\n",
                                 "apt-get install ruby -y\n",
                                 "apt-get install wget -y\n",
-                                "mkdir /opt/java-app\n",
+                                "apt-get install nginx -y\n",
+                                "systemctl start nginx\n",
+                                "systemctl enable nginx\n",
                                 "cd /home/ubuntu\n",
                                 "wget https://aws-codedeploy-us-east-1.s3.amazonaws.com/latest/install\n",
                                 "chmod +x ./install\n",
                                 "sudo ./install auto\n",
                                 "service codedeploy-agent start\n",
-                                "rm install\n",
-                                "apt-get install -y openjdk-11-jdk\n",
-                                "update-alternatives --config java\n"
+                                "rm install\n"
                             ]
                         ]
                     }
@@ -464,20 +451,18 @@
                                                 "Arn"
                                             ]
                                         },
-                                        {
-                                            "Fn::Join": [
-                                                "",
-                                                [
-                                                    {
-                                                        "Fn::GetAtt": [
-                                                            "ArtifactBucket",
-                                                            "Arn"
-                                                        ]
-                                                    },
-                                                    "/*"
-                                                ]
+                                        {"Fn::Join": [
+                                            "",
+                                            [
+                                                {
+                                                    "Fn::GetAtt": [
+                                                        "ArtifactBucket",
+                                                        "Arn"
+                                                    ]
+                                                },
+                                                "/*"
                                             ]
-                                        }
+                                        ]}
                                     ],
                                     "Action": [
                                         "s3:GetObject",
@@ -492,33 +477,26 @@
                     }
                 ]
             }
+        }, 
+   "AppBuildProject": {
+            "Type": "AWS::CodeBuild::Project",
+            "Properties": {
+                "Artifacts": {
+                    "Type": "CODEPIPELINE"
+                },
+                "Description": "app build project",
+                "Environment": {
+                    "ComputeType": "BUILD_GENERAL1_SMALL",
+                    "Image": "aws/codebuild/standard:5.0",
+                    "ImagePullCredentialsType": "CODEBUILD",
+                    "Type": "LINUX_CONTAINER"
+                },
+                "ServiceRole": { "Fn::GetAtt": [ "AppBuildRole", "Arn" ] },
+                "Source": {
+                    "Type": "CODEPIPELINE"
+                }
+            }
         },
-        "AppBuildProject": {
-  "Type": "AWS::CodeBuild::Project",
-  "Properties": {
-    "Artifacts": {
-      "Type": "CODEPIPELINE"
-    },
-    "Environment": {
-      "ComputeType": "BUILD_GENERAL1_SMALL",
-      "Image": "aws/codebuild/amazonlinux2-x86_64-standard:4.0",
-      "Type": "LINUX_CONTAINER",
-      "EnvironmentVariables": [
-        {
-          "Name": "JAVA_HOME",
-          "Value": "/usr/lib/jvm/java-11-amazon-corretto"
-        }
-      ]
-    },
-    "ServiceRole": {
-      "Fn::GetAtt": ["AppBuildRole", "Arn"]
-    },
-    "Source": {
-      "Type": "CODEPIPELINE"
-    },
-    "BuildSpec": "version: 0.2\nphases:\n  install:\n    runtime-versions:\n      java: corretto11\n    commands:\n      - echo \"Installing Maven...\"\n      - wget https://dlcdn.apache.org/maven/maven-3/3.8.6/binaries/apache-maven-3.8.6-bin.tar.gz -P /tmp\n      - tar xf /tmp/apache-maven-*.tar.gz -C /opt\n      - ln -s /opt/apache-maven-3.8.6 /opt/maven\n      - echo \"export M2_HOME=/opt/maven\" >> ~/.bashrc\n      - echo \"export PATH=\\$M2_HOME/bin:\\$PATH\" >> ~/.bashrc\n      - source ~/.bashrc\n  build:\n    commands:\n      - echo \"Building Java project...\"\n      - mvn clean package\nartifacts:\n  files:\n    - '**/*'\n  base-directory: 'target'"
-  }
-},
         "AppBuildRole": {
             "Type": "AWS::IAM::Role",
             "Properties": {
